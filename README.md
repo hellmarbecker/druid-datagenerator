@@ -1,6 +1,150 @@
 # How to use the Druid Data Driver
 
-## Program description
+
+## The Data Driver Server using Docker
+You can run the data driver in a docker container using:
+```
+docker run -d -p 9999:9999 imply/datagen:latest
+```
+
+The server provides the following APIs:
+
+### list
+Lists the data generation configurations available on the server.
+Example:
+```
+curl "http://localhost:9999/list"
+```
+Output: 
+```
+["clickstream/clickstream.json", "clickstream/users_init.json", "clickstream/users_changes.json", "examples/langmap.json", "examples/missing.json", "examples/simple.json", "examples/list.json", "examples/deepthought.json", "examples/variable.json", "examples/nulls.json", "examples/counter.json", "examples/object.json", "examples/types.json"]
+```
+
+### /start
+Initiates a data generation process with the specified configuration. The configuration can be selected from the available configurations by using the `config_file` property in the request. Alternatively, a custom configuration can be provided in the `config` property.
+The payload for this request has the following format:
+```json
+{
+    "name": "<job name>",
+    "target": "<target specification>",
+    "config": "<config JSON>",
+    "config_file": "<name of the config file on the server>",
+    "total_events": "<total number of messages to generate>",
+    "concurrency": "<max number of concurrent state machines>",
+    "time": "<duration for data generation>",
+    "time_type": "SIM | REAL | <start timestamp>"
+}
+```
+Where:
+- _"name"_ - (required) unique name for the job
+- _"target"_ - (required) describes where to publish generated data.
+- _"config"_ - (_config_ or _config_file_ required) custom configuration object.
+- _"config_file"_ - (_config_ or _config_file_ required) [predefined configuration](###GET_/list) is used.
+- _"total_events"_ - (optional) total number of events to generate
+- _"time"_ - (optional) total duration to run specified in seconds, minutes or hours (ex. "15s", "10m", "5h")
+- _"concurrency"_ - (optional) max number of state machines to create
+- _"time_type"_ - (optional) "SIM" - simulate time, "REAL" - run in real-time
+  - can be set to a timestamp ("YYYY-MM-DD HH:MM:SS") to use a simulated start time  
+
+When "time_type" is either "SIM" or a timestamp literal value, the job will simulate the passage of time for a with a simulated duration of "time" and complete when the simulated duration is reached.
+
+If "time_type" is "REAL" then and "time" is specified, then the job will complete after the specified duration in real time.
+
+If "total_events" is specified, the job will complete once it generates the specified number of messages.
+
+Example payload:
+```json
+{
+    "name": "generate_clicks",
+    "target":{
+      "type": "kafka",
+      "endpoint": "kafka:9092",
+      "topic": "clicks",
+      "topic_key": ["user_id"]
+      },
+    "config_file": "clickstream/clickstream.json",
+    "total_events":10000,
+    "concurrency":100
+}
+```
+
+### /jobs
+Displays a list of currently running jobs, including their current status.
+```
+curl -X GET "http://localhost:9999/jobs"
+```
+```json
+[ { "name": "gen_clickstream1", "config_file": "clickstream/clickstream.json", 
+    "target": {"type": "file", "path": "/files/clicks1.json"}, 
+    "active_sessions": 100, "total_records": 2405, "start_time": "2023-08-02 22:11:39", 
+    "run_time": 462.520603, 
+    "status": "RUNNING"}, 
+  { "name": "gen_clickstream2", "config_file": "clickstream/clickstream.json", 
+    "target": {"type": "file", "path": "/files/clicks2.json"}, 
+    "active_sessions": 100, "total_records": 2383, "start_time": "2023-08-02 22:11:40", 
+    "run_time": 461.291613, 
+    "status": "RUNNING"}, 
+  { "name": "gen_clickstream3", "config_file": "clickstream/clickstream.json", 
+    "target": {"type": "file", "path": "/files/clicks3.json"}, 
+    "active_sessions": 100, "total_records": 2428, "start_time": "2023-08-02 22:11:40", 
+    "run_time": 461.533282, 
+    "status": "RUNNING"}]
+```
+
+### /stop/\<job name>
+This request will stop the job named <job_name> if it is running. 
+
+It also removes the job from the list of known jobs as displayed in the /jobs API.
+
+Example:
+```
+curl -X POST "http://localhost:9999/stop/gen_clickstream1"
+```
+```json
+{"message":"Job [gen_clickstream1] stopped successfully."}
+```
+
+### /status/\<job_name>
+Displays the definition and current status of the job named <job_name>.
+Example:
+```
+curl "http://localhost:9999/status/gen_clickstream1"
+```
+
+```json
+{ "name": "gen_clickstream1", "config_file": "clickstream/clickstream.json", 
+    "target": {"type": "file", "path": "/files/clicks1.json"}, 
+    "active_sessions": 100, "total_records": 2405, "start_time": "2023-08-02 22:11:39", 
+    "run_time": 462.520603, 
+    "status": "RUNNING"}
+```
+
+### /files
+Displays the definition and current status of the job named <job_name>.
+Example:
+```
+curl "http://localhost:9999/files"
+```
+```json
+["sample_data.json", "clicks.json", "clicks1.json", "clicks2.json", "clickstream_data.json", "clicks3.json"]
+```
+
+### /file/<file_name>
+Displays the definition and current status of the job named <job_name>.
+Example:
+```
+curl "http://localhost:9999/file/clicks.json"  | tail -5
+```
+```json
+{"time":"2023-08-02T22:27:48.418","user_id":"2142","event_type":"view_cart","client_ip":"127.250.32.144","client_device":"desktop","client_lang":"Arabic","client_country":"Indonesia","referrer":"bing.com/search","keyword":"gifts","product":"Electric shock pen"}
+{"time":"2023-08-02T22:27:48.431","user_id":"2586","event_type":"view_product","client_ip":"127.174.137.91","client_device":"mobile","client_lang":"Mandarin","client_country":"Nigeria","referrer":"amazon.com","keyword":"t-shirts","product":"Toilet golf putting green"}
+{"time":"2023-08-02T22:27:48.710","user_id":"3850","event_type":"search","client_ip":"127.167.21.193","client_device":"mobile","client_lang":"French","client_country":"Nigeria","referrer":"google.com/search","keyword":"Geeky gifts","product":"Novelty toilet paper"}
+{"time":"2023-08-02T22:27:48.899","user_id":"3846","event_type":"view_product","client_ip":"127.74.91.52","client_device":"laptop","client_lang":"English","client_country":"China","referrer":"google.com/search","keyword":"Geeky gifts","product":"Rubber chicken"}
+{"time":"2023-08-02T22:27:48.905","user_id":"1966","event_type":"search","client_ip":"127.167.136.121","client_device":"mobile","client_lang":"English","client_country":"United States","referrer":"bing.com/search","keyword":"Gag gifts","product":"Bubble wrap suit"}
+```
+
+
+## Command Line Execution 
 
 The Druid Data Driver is a python script that simulates a workload that generates data for Druid ingestion.
 You can use a JSON config file to describe the characteristics of the workload you want the Druid Data Driver to simulate.
@@ -22,13 +166,14 @@ pip install sortedcontainers
 
 Run the program as follows:
 
-```python DruidDataDriver.py <options>```
+```python generator/DruidDataDriver.py <options>```
 
 Options include:
 
 ```
--f <configuration file name>
--s
+-f <configuration definition file name>
+-o <target definition file name>
+-s <start time in ISO format (optional)>
 -n <total number of records to generate>
 -t <duration for generating records>
 ```
@@ -36,9 +181,11 @@ Options include:
 Use the _-f_ option to designate a configuration file name.
 If you omit the _-f_ option, the script reads the configuration from _stdin_.
 
+Use the _-o_ option to designate a target definition file name. The [target](###"target"_object) defines where the generated messages are sent.
+
 The _-s_ option tells the driver to use simulated time instead of wall clock time (the default).
-The simulated clock starts at the current time and advances the simulated clock based on the
-generated events (i.e., records).
+The simulated clock starts at the time specified by the argument (or the current time if no argument is specified) and
+advances the simulated clock based on the generated events (i.e., records).
 When used with the _-t_ option, the simulated clock simulates the duration.
 This option is useful for generating batch data as quickly as possible.
 
@@ -64,11 +211,101 @@ Or, specify 1 hour as follows:
 -t 1H
 ```
 
-## Config File
+#### Example Command Line run:
 
-The config file contains JSON describing the characteristics of the workload you want to simulate (see the _examples_ folder for example config files).
+Create a file for the target definition with:
+```
+echo '{"type":"stdout"}' > /tmp/target
+```
+Run with a predefined data generation config file for 10 seconds:
+```
+python3.11 generator/DruidDataDriver.py -f clickstream/clickstream.json -o /tmp/target -t 10s
+
+{"__time":"2023-07-28T16:26:39.744","user_id":"2816","event_type":"login","client_ip":"127.157.215.28","client_device":"desktop","client_lang":"Spanish","client_country":"Vietnam","referrer":"bing.com/search","keyword":"None","product":"None"}
+{"__time":"2023-07-28T16:26:39.886","user_id":"3273","event_type":"login","client_ip":"127.253.19.98","client_device":"mobile","client_lang":"Mandarin","client_country":"Indonesia","referrer":"adserve.com","keyword":"None","product":"None"}
+{"__time":"2023-07-28T16:26:39.901","user_id":"1565","event_type":"home","client_ip":"127.220.178.38","client_device":"mobile","client_lang":"Russian","client_country":"Philippines","referrer":"bing.com/search","keyword":"None","product":"None"}
+{"__time":"2023-07-28T16:26:39.936","user_id":"3875","event_type":"login","client_ip":"127.33.246.91","client_device":"mobile","client_lang":"French","client_country":"Bazil","referrer":"twitter.com/post","keyword":"None","product":"None"}
+{"__time":"2023-07-28T16:26:40.204","user_id":"654","event_type":"login","client_ip":"127.33.184.203","client_device":"desktop","client_lang":"English","client_country":"United States","referrer":"amazon.com","keyword":"None","product":"None"}
+```
+
+
+
+## Data Generator Target
+The target defines where the data will be written or published.
+
+### "target" object
+
+There are four flavors of targets: _stdout_, _file_, _kafka_, and _confluent_.
+
+_stdout_ targets print the JSON records to standard out and have the form:
+
+```
+"target": {
+  "type": "stdout"
+}
+```
+
+_file_ targets write records to the specified file and have the following format:
+
+```
+"target": {
+  "type": "file",
+  "path": "<filename goes here>"
+}
+```
+
+Where:
+- <i>path</i> is the path and file name
+
+_kafka_ targets write records to a Kafka topic and have this format:
+
+```
+"target": {
+  "type": "kafka",
+  "endpoint": "<ip address and optional port>",
+  "topic": "<topic name>",
+  "topic_key": [<list of key fields>],
+  "security_protocol": "<protocol designation>",
+  "compression_type": "<compression type designation>"
+}
+```
+
+Where:
+- <i>endpoint</i> is the IP address and optional port number (e.g., "127.0.0.1:9092") - if the port is omitted, 9092 is used
+- <i>topic</i> is the topic name as a string
+- <i>topic_key</i> (optional) is the list of generated fields used to build the key for each message
+- <i>security_protocol</i> (optional) a protocol specifier ("PLAINTEXT" (default if omitted), "SSL", "SASL_PLAINTEXT", "SASL_SSL")
+- <i>compression_type</i> (optional) a compression specifier ("gzip", "snappy", "lz4") - if omitted, no compression is used
+
+_confluent_ targets write records to a Confluent topic and have this format:
+
+```
+"target": {
+  "type": "confluent",
+  "servers": "<bootstrap servers>",
+  "topic": "<topic name>",
+  "topic_key": [<list of key fields>],
+  "username": "<username>",
+  "password": "<password>"
+}
+```
+
+Where:
+- <i>servers</i> is the confluent servers (e.g., "pkc-lzvrd.us-west4.gcp.confluent.cloud:9092")
+- <i>topic</i> is the topic name as a string
+- <i>topic_key</i> (optional) is the list of generated fields used to build the key for each message
+- <i>username</i> cluster API key
+- <i>password</i> cluster API secret
+
+
+
+## Data Generator Configuration
+
+The config JSON object describes the characteristics of the workload you want to simulate (see the _examples_ folder for example config files).
 A workload consists of a state machine, where each state outputs a record.
-The state machine is probabilistic, which means that the state transitions may be stochastic based on probabilities.
+New state machines are instantiated based on the `interarrival` property.
+Each state machine can be used to simulate the events generated by an entity like device (IoT) or a user session (clickstream).
+Each state machine is probabilistic, which means that the state transitions may be stochastic based on probabilities.
 Each state in the state machine performs four operations:
 - First, the state sets any variable values
 - Next, the state emits a record (based on an emitter description)
@@ -78,18 +315,16 @@ Each state in the state machine performs four operations:
 Emitters are record generators that output records as specified in the emitter description.
 Each state employs a single emitter, but the same emitter may be used by many states.
 
-The config file has the following format:
+The config JSON has the following format:
 
 ```
 {
-  "target": {...},
   "emitters": [...],
   "interarrival": {...},
   "states": [...]
 }
 ```
 
-The _target_ object describes the output destination.
 The _emitters_ list is a list of record generators.
 The _interarrival_ object describes the inter-arrival times (i.e., inverse of the arrival rate) of entities to the state machine
 The _states_ list is a description of the state machine
@@ -160,66 +395,6 @@ Where:
 - _stddev_ is the stadard deviation of the distribution
 
 Note that negative values generated by the normal distribution may be forced to zero when necessary (e.g., interarrival times).
-
-### "target": {}
-
-There are four flavors of targets: _stdout_, _file_, _kafka_, and _confluent_.
-
-_stdout_ targets print the JSON records to standard out and have the form:
-
-```
-"target": {
-  "type": "stdout"
-}
-```
-
-_file_ targets write records to the specified file and have the following format:
-
-```
-"target": {
-  "type": "file",
-  "path": "<filename goes here>"
-}
-```
-
-Where:
-- <i>path</i> is the path and file name
-
-_kafka_ targets write records to a Kafka topic and have this format:
-
-```
-"target": {
-  "type": "kafka",
-  "endpoint": "<ip address and optional port>",
-  "topic": "<topic name>",
-  "security_protocol": "<protocol designation>",
-  "compression_type": "<compression type designation>"
-}
-```
-
-Where:
-- <i>endpoint</i> is the IP address and optional port number (e.g., "127.0.0.1:9092") - if the port is omitted, 9092 is used
-- <i>topic</i> is the topic name as a string
-- <i>security_protocol</i> (optional) a protocol specifier ("PLAINTEXT" (default if omitted), "SSL", "SASL_PLAINTEXT", "SASL_SSL")
-- <i>compression_type</i> (optional) a compression specifier ("gzip", "snappy", "lz4") - if omitted, no compression is used
-
-_confluent_ targets write records to a Confluent topic and have this format:
-
-```
-"target": {
-  "type": "confluent",
-  "servers": "<bootstrap servers>",
-  "topic": "<topic name>",
-  "username": "<username>",
-  "password": "<password>"
-}
-```
-
-Where:
-- <i>servers</i> is the confluent servers (e.g., "pkc-lzvrd.us-west4.gcp.confluent.cloud:9092")
-- <i>topic</i> is the topic name as a string
-- <i>username</i> cluster API key
-- <i>password</i> cluster API secret
 
 
 ### "emitters": []
@@ -306,7 +481,7 @@ Where:
 
 ###### { "type": "string" ...}
 
-String dimension speficiation entries have the following format:
+String dimension specification entries have the following format:
 
 ```
 {
@@ -327,6 +502,30 @@ Where:
 - <i>cardinality</i> indicates the number of unique values for this dimension (zero for unconstrained cardinality)
 - <i>cardinality_distribution</i> informs the cardinality selection of the generated values (omit if cardinality is zero)
 - <i>chars</i> (optional) is a list (e.g., "ABC123") of characters that may be used to generate strings - if not specified, all printable characters will be used
+- <i>percent_missing</i> a value in the range of 0.0 and 100.0 (inclusive) indicating the stochastic frequency for omitting this dimension from records (optional - the default value is 0.0 if omitted)
+- <i>percent_nulls</i> a value in the range of 0.0 and 100.0 (inclusive) indicating the stochastic frequency for generating null values (optional - the default value is 0.0 if omitted)
+
+###### { "type": "counter" ...}
+
+Counter dimensions are values that increment each time they occur in a record (counters are not incremented when they are missing or null).
+Counters may be useful for dimensions simulating serial numbers, etc.
+Counter dimension specification entries have the following format:
+
+```
+{
+  "type": "counter",
+  "name": "<dimension name>",
+  "start": "<counter starting value (optional)>",
+  "increment": "<counter increment value (optional)>",
+  "percent_missing": <percentage value>,
+  "percent_nulls": <percentage value>
+}
+```
+
+Where:
+- <i>name</i> is the name of the dimension
+- <i>start</i> is the initial value of the counter. (optional - the default is 0)
+- <i>increment</i> is the amount to increment the value (optional - the default is 1)
 - <i>percent_missing</i> a value in the range of 0.0 and 100.0 (inclusive) indicating the stochastic frequency for omitting this dimension from records (optional - the default value is 0.0 if omitted)
 - <i>percent_nulls</i> a value in the range of 0.0 and 100.0 (inclusive) indicating the stochastic frequency for generating null values (optional - the default value is 0.0 if omitted)
 
